@@ -109,34 +109,84 @@ def explode_column(df, column_name):
     return temp_df.explode(column_name)
 
 
-def generate_export_report(filtered_df, df, year, country, beneficiary):
-    """Generates a clean Markdown report string from active dashboard metrics."""
-    if filtered_df.empty:
-        return "# 📊 ASEAN DSE Analytics Summary Report\nNo data available for the current filters."
+def get_stats_dict(data_subset):
+    """Creates a standardized dictionary of stats for JSON export."""
+    if data_subset.empty:
+        return {}
 
-    # Compute active metrics dynamically
-    sdg_df = explode_column(filtered_df, 'Target SDGs')
-    tech_df = explode_column(filtered_df, 'Tech Stack Integrated')
-    sol_df = explode_column(filtered_df, 'Solution Type')
-
-    top_sdg = sdg_df['Target SDGs'].mode()[0] if not sdg_df.empty else "N/A"
-    top_tech = tech_df['Tech Stack Integrated'].mode()[0] if not tech_df.empty else "N/A"
-    top_sol = sol_df['Solution Type'].mode()[0] if not sol_df.empty else "N/A"
-
-    winners_df = df[df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
-
-    # Calculate new metrics for export
-    ben_counts = filtered_df['Target Beneficiary'].value_counts()
-    comp_counts = filtered_df['SDG Count'].value_counts()
+    sdg_counts = explode_column(data_subset, 'Target SDGs')['Target SDGs'].value_counts().to_dict()
+    tech_counts = explode_column(data_subset, 'Tech Stack Integrated')['Tech Stack Integrated'].value_counts().to_dict()
+    sol_counts = explode_column(data_subset, 'Solution Type')['Solution Type'].value_counts().to_dict()
+    ben_counts = data_subset['Target Beneficiary'].value_counts().to_dict()
+    comp_counts = {f"{int(k)} SDGs": v for k, v in data_subset['SDG Count'].value_counts().items()}
 
     team_mapping = {True: 'Different Universities', False: 'Same University', "TRUE": 'Different Universities',
                     "FALSE": 'Same University', "True": 'Different Universities', "False": 'Same University'}
-    team_counts = filtered_df['Cross-Institution Team'].map(team_mapping).fillna(
-        'Unknown').value_counts() if 'Cross-Institution Team' in filtered_df.columns else pd.Series()
+    if 'Cross-Institution Team' in data_subset.columns:
+        team_counts = data_subset['Cross-Institution Team'].map(team_mapping).fillna('Unknown').value_counts().to_dict()
+    else:
+        team_counts = {}
 
-    buzz_df = get_top_buzzwords(filtered_df, 'Brief Description', top_n=10)
+    buzz_df = get_top_buzzwords(data_subset, 'Brief Description', top_n=10)
+    buzz_dict = dict(zip(buzz_df['Word'], buzz_df['Count'])) if not buzz_df.empty else {}
 
-    # Formatted Markdown report
+    return {
+        "total_storyboards": len(data_subset),
+        "sdg_distribution": sdg_counts,
+        "beneficiary_distribution": ben_counts,
+        "tech_stack_distribution": tech_counts,
+        "solution_type_distribution": sol_counts,
+        "sdg_complexity_distribution": comp_counts,
+        "team_formation_distribution": team_counts,
+        "top_buzzwords": buzz_dict
+    }
+
+
+def generate_export_report(filtered_df, df, year, country, beneficiary):
+    """Generates a clean Markdown report string containing both Overall and Winners metrics."""
+    if filtered_df.empty:
+        return "# 📊 ASEAN DSE Analytics Summary Report\nNo data available for the current filters."
+
+    current_winners = filtered_df[filtered_df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
+    winners_hall_of_fame = df[df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
+
+    def create_markdown_section(data_subset, title):
+        if data_subset.empty:
+            return f"## {title}\n*No data available for this subset.*\n"
+
+        stats = get_stats_dict(data_subset)
+
+        # Determine Top Items safely
+        top_sdg = list(stats['sdg_distribution'].keys())[0] if stats['sdg_distribution'] else "N/A"
+        top_tech = list(stats['tech_stack_distribution'].keys())[0] if stats['tech_stack_distribution'] else "N/A"
+        top_sol = list(stats['solution_type_distribution'].keys())[0] if stats['solution_type_distribution'] else "N/A"
+
+        return f"""## {title}
+**Total Storyboards Analyzed:** {stats['total_storyboards']}
+**Top Targeted SDG:** {top_sdg} | **Top Tech Stack:** {top_tech} | **Top Solution Type:** {top_sol}
+
+### 🎯 Target SDGs Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in stats['sdg_distribution'].items()])}
+
+### 👥 Primary Beneficiaries Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in stats['beneficiary_distribution'].items()])}
+
+### 🛠️ Preferred Tech Stacks Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in stats['tech_stack_distribution'].items()])}
+
+### 📱 Solution Types Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in stats['solution_type_distribution'].items()])}
+
+### 🧩 SDG Complexity (Number of SDGs Targeted)
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in stats['sdg_complexity_distribution'].items()])}
+
+### 🤝 Team Formation
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in stats['team_formation_distribution'].items()])}
+
+### 🗣️ Top 10 Buzzwords Used
+{chr(10).join([f'- **"{k}"**: {v} times' for k, v in stats['top_buzzwords'].items()]) if stats['top_buzzwords'] else "No buzzwords extracted."}
+"""
+
     report = f"""# 📊 ASEAN DSE Analytics Summary Report
 **Generated Date:** {pd.Timestamp.now().strftime('%Y-%m-%d')}
 
@@ -146,55 +196,20 @@ def generate_export_report(filtered_df, df, year, country, beneficiary):
 - **Selected Year:** {year}
 - **Selected Country:** {country}
 - **Selected Beneficiary:** {beneficiary}
+- **Total Unique Countries Represented:** {filtered_df['Country'].nunique()}
 
 ---
 
-## 📈 High-Level Key Metrics
-- **Total Storyboards Analyzed:** {len(filtered_df)}
-- **Unique Countries Represented:** {filtered_df['Country'].nunique()}
-- **Top Targeted SDG:** {top_sdg}
-- **Top Tech Stack:** {top_tech}
-- **Top Solution Type:** {top_sol}
+{create_markdown_section(filtered_df, "🌐 OVERALL REGIONAL TRENDS")}
 
 ---
 
-## 🎯 Target SDGs Breakdown
-{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in sdg_df['Target SDGs'].value_counts().items()])}
-
----
-
-## 👥 Primary Beneficiaries Breakdown
-{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in ben_counts.items()])}
-
----
-
-## 🛠️ Preferred Tech Stacks Breakdown
-{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in tech_df['Tech Stack Integrated'].value_counts().items()])}
-
----
-
-## 📱 Solution Types Breakdown
-{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in sol_df['Solution Type'].value_counts().items()])}
-
----
-
-## 🧩 SDG Complexity (Number of SDGs Targeted)
-{chr(10).join([f'- **{int(k)} SDGs**: {v} team(s)' for k, v in comp_counts.items()])}
-
----
-
-## 🤝 Team Formation
-{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in team_counts.items()])}
-
----
-
-## 🗣️ Top 10 Buzzwords Used
-{chr(10).join([f'- **"{row["Word"]}"**: {row["Count"]} times' for _, row in buzz_df.iterrows()]) if not buzz_df.empty else "No buzzwords extracted."}
+{create_markdown_section(current_winners, "🥇 THE WINNERS' PLAYBOOK (1st, 2nd, 3rd Place)")}
 
 ---
 
 ## 🏆 Podium Finishes by Country (All-Time Hall of Fame)
-{chr(10).join([f'- **{k}**: {v} podium finish(es)' for k, v in winners_df['Country'].value_counts().items()])}
+{chr(10).join([f'- **{k}**: {v} podium finish(es)' for k, v in winners_hall_of_fame['Country'].value_counts().items()])}
 
 ---
 *Report generated automatically from ASEAN DSE Analytics Dashboard.*
@@ -227,7 +242,6 @@ if selected_year != "All Time":
 if selected_country != "All Countries":
     filtered_df = filtered_df[filtered_df['Country'] == selected_country]
 if selected_beneficiary != "All Beneficiaries":
-    # Use a string contains check since beneficiary could be part of a comma-separated list
     filtered_df = filtered_df[filtered_df['Target Beneficiary'].str.contains(selected_beneficiary, na=False)]
 
 st.sidebar.markdown("---")
@@ -257,32 +271,16 @@ if not filtered_df.empty:
     )
 
     # 3. Export Key Statistics (JSON)
-    sdg_counts = explode_column(filtered_df, 'Target SDGs')['Target SDGs'].value_counts().to_dict()
-    tech_counts = explode_column(filtered_df, 'Tech Stack Integrated')['Tech Stack Integrated'].value_counts().to_dict()
-    sol_counts = explode_column(filtered_df, 'Solution Type')['Solution Type'].value_counts().to_dict()
-    ben_counts_dict = filtered_df['Target Beneficiary'].value_counts().to_dict()
-    comp_counts_dict = {f"{int(k)} SDGs": v for k, v in filtered_df['SDG Count'].value_counts().items()}
-
-    team_mapping = {True: 'Different Universities', False: 'Same University', "TRUE": 'Different Universities',
-                    "FALSE": 'Same University', "True": 'Different Universities', "False": 'Same University'}
-    team_counts_dict = filtered_df['Cross-Institution Team'].map(team_mapping).fillna(
-        'Unknown').value_counts().to_dict() if 'Cross-Institution Team' in filtered_df.columns else {}
-
-    buzz_df_json = get_top_buzzwords(filtered_df, 'Brief Description', top_n=10)
-    buzz_dict = dict(zip(buzz_df_json['Word'], buzz_df_json['Count'])) if not buzz_df_json.empty else {}
+    current_winners = filtered_df[filtered_df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
 
     json_stats = {
-        "filter_year": selected_year,
-        "filter_country": selected_country,
-        "filter_beneficiary": selected_beneficiary,
-        "total_storyboards": len(filtered_df),
-        "sdg_distribution": sdg_counts,
-        "beneficiary_distribution": ben_counts_dict,
-        "tech_stack_distribution": tech_counts,
-        "solution_type_distribution": sol_counts,
-        "sdg_complexity_distribution": comp_counts_dict,
-        "team_formation_distribution": team_counts_dict,
-        "top_buzzwords": buzz_dict
+        "metadata": {
+            "filter_year": selected_year,
+            "filter_country": selected_country,
+            "filter_beneficiary": selected_beneficiary
+        },
+        "overall_stats": get_stats_dict(filtered_df),
+        "winners_playbook_stats": get_stats_dict(current_winners)
     }
 
     st.sidebar.download_button(
@@ -290,7 +288,7 @@ if not filtered_df.empty:
         data=json.dumps(json_stats, indent=4),
         file_name=f"asean_dse_stats_{selected_year}.json",
         mime="application/json",
-        help="Download structured JSON statistics for programmatic analysis or slides."
+        help="Download structured JSON statistics (including Winners deltas) for programmatic analysis."
     )
 
 st.sidebar.markdown("---")
@@ -471,7 +469,6 @@ with tab1:
     render_charts(filtered_df, "🌐 Overall Regional Trends", 'Purples', px.colors.qualitative.Pastel)
 
 with tab2:
-    current_winners = filtered_df[filtered_df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
     if not current_winners.empty:
         render_charts(current_winners, "🥇 The Winners' Playbook (1st, 2nd, 3rd Place)", 'Greens',
                       px.colors.qualitative.Set2)
