@@ -125,6 +125,17 @@ def generate_export_report(filtered_df, df, year, country, beneficiary):
 
     winners_df = df[df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
 
+    # Calculate new metrics for export
+    ben_counts = filtered_df['Target Beneficiary'].value_counts()
+    comp_counts = filtered_df['SDG Count'].value_counts()
+
+    team_mapping = {True: 'Different Universities', False: 'Same University', "TRUE": 'Different Universities',
+                    "FALSE": 'Same University', "True": 'Different Universities', "False": 'Same University'}
+    team_counts = filtered_df['Cross-Institution Team'].map(team_mapping).fillna(
+        'Unknown').value_counts() if 'Cross-Institution Team' in filtered_df.columns else pd.Series()
+
+    buzz_df = get_top_buzzwords(filtered_df, 'Brief Description', top_n=10)
+
     # Formatted Markdown report
     report = f"""# 📊 ASEAN DSE Analytics Summary Report
 **Generated Date:** {pd.Timestamp.now().strftime('%Y-%m-%d')}
@@ -152,6 +163,11 @@ def generate_export_report(filtered_df, df, year, country, beneficiary):
 
 ---
 
+## 👥 Primary Beneficiaries Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in ben_counts.items()])}
+
+---
+
 ## 🛠️ Preferred Tech Stacks Breakdown
 {chr(10).join([f'- **{k}**: {v} team(s)' for k, v in tech_df['Tech Stack Integrated'].value_counts().items()])}
 
@@ -159,6 +175,21 @@ def generate_export_report(filtered_df, df, year, country, beneficiary):
 
 ## 📱 Solution Types Breakdown
 {chr(10).join([f'- **{k}**: {v} team(s)' for k, v in sol_df['Solution Type'].value_counts().items()])}
+
+---
+
+## 🧩 SDG Complexity (Number of SDGs Targeted)
+{chr(10).join([f'- **{int(k)} SDGs**: {v} team(s)' for k, v in comp_counts.items()])}
+
+---
+
+## 🤝 Team Formation
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in team_counts.items()])}
+
+---
+
+## 🗣️ Top 10 Buzzwords Used
+{chr(10).join([f'- **"{row["Word"]}"**: {row["Count"]} times' for _, row in buzz_df.iterrows()]) if not buzz_df.empty else "No buzzwords extracted."}
 
 ---
 
@@ -199,7 +230,6 @@ if selected_beneficiary != "All Beneficiaries":
     # Use a string contains check since beneficiary could be part of a comma-separated list
     filtered_df = filtered_df[filtered_df['Target Beneficiary'].str.contains(selected_beneficiary, na=False)]
 
-# --- EXPORT CENTER ---
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Export Center")
 
@@ -230,6 +260,16 @@ if not filtered_df.empty:
     sdg_counts = explode_column(filtered_df, 'Target SDGs')['Target SDGs'].value_counts().to_dict()
     tech_counts = explode_column(filtered_df, 'Tech Stack Integrated')['Tech Stack Integrated'].value_counts().to_dict()
     sol_counts = explode_column(filtered_df, 'Solution Type')['Solution Type'].value_counts().to_dict()
+    ben_counts_dict = filtered_df['Target Beneficiary'].value_counts().to_dict()
+    comp_counts_dict = {f"{int(k)} SDGs": v for k, v in filtered_df['SDG Count'].value_counts().items()}
+
+    team_mapping = {True: 'Different Universities', False: 'Same University', "TRUE": 'Different Universities',
+                    "FALSE": 'Same University', "True": 'Different Universities', "False": 'Same University'}
+    team_counts_dict = filtered_df['Cross-Institution Team'].map(team_mapping).fillna(
+        'Unknown').value_counts().to_dict() if 'Cross-Institution Team' in filtered_df.columns else {}
+
+    buzz_df_json = get_top_buzzwords(filtered_df, 'Brief Description', top_n=10)
+    buzz_dict = dict(zip(buzz_df_json['Word'], buzz_df_json['Count'])) if not buzz_df_json.empty else {}
 
     json_stats = {
         "filter_year": selected_year,
@@ -237,8 +277,12 @@ if not filtered_df.empty:
         "filter_beneficiary": selected_beneficiary,
         "total_storyboards": len(filtered_df),
         "sdg_distribution": sdg_counts,
+        "beneficiary_distribution": ben_counts_dict,
         "tech_stack_distribution": tech_counts,
-        "solution_type_distribution": sol_counts
+        "solution_type_distribution": sol_counts,
+        "sdg_complexity_distribution": comp_counts_dict,
+        "team_formation_distribution": team_counts_dict,
+        "top_buzzwords": buzz_dict
     }
 
     st.sidebar.download_button(
