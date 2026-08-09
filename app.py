@@ -4,6 +4,7 @@ import plotly.express as px
 import os
 import re
 from collections import Counter
+import json
 
 st.set_page_config(
     page_title="ASEAN DSE Analytics",
@@ -107,10 +108,73 @@ def explode_column(df, column_name):
     temp_df[column_name] = temp_df[column_name].astype(str).str.split(r',\s*')
     return temp_df.explode(column_name)
 
+
+def generate_export_report(filtered_df, df, year, country, beneficiary):
+    """Generates a clean Markdown report string from active dashboard metrics."""
+    if filtered_df.empty:
+        return "# 📊 ASEAN DSE Analytics Summary Report\nNo data available for the current filters."
+
+    # Compute active metrics dynamically
+    sdg_df = explode_column(filtered_df, 'Target SDGs')
+    tech_df = explode_column(filtered_df, 'Tech Stack Integrated')
+    sol_df = explode_column(filtered_df, 'Solution Type')
+
+    top_sdg = sdg_df['Target SDGs'].mode()[0] if not sdg_df.empty else "N/A"
+    top_tech = tech_df['Tech Stack Integrated'].mode()[0] if not tech_df.empty else "N/A"
+    top_sol = sol_df['Solution Type'].mode()[0] if not sol_df.empty else "N/A"
+
+    winners_df = df[df['Rank Placement'].isin(['1st Place', '2nd Place', '3rd Place'])]
+
+    # Formatted Markdown report
+    report = f"""# 📊 ASEAN DSE Analytics Summary Report
+**Generated Date:** {pd.Timestamp.now().strftime('%Y-%m-%d')}
+
+---
+
+## 🔍 Active Filters Applied
+- **Selected Year:** {year}
+- **Selected Country:** {country}
+- **Selected Beneficiary:** {beneficiary}
+
+---
+
+## 📈 High-Level Key Metrics
+- **Total Storyboards Analyzed:** {len(filtered_df)}
+- **Unique Countries Represented:** {filtered_df['Country'].nunique()}
+- **Top Targeted SDG:** {top_sdg}
+- **Top Tech Stack:** {top_tech}
+- **Top Solution Type:** {top_sol}
+
+---
+
+## 🎯 Target SDGs Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in sdg_df['Target SDGs'].value_counts().items()])}
+
+---
+
+## 🛠️ Preferred Tech Stacks Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in tech_df['Tech Stack Integrated'].value_counts().items()])}
+
+---
+
+## 📱 Solution Types Breakdown
+{chr(10).join([f'- **{k}**: {v} team(s)' for k, v in sol_df['Solution Type'].value_counts().items()])}
+
+---
+
+## 🏆 Podium Finishes by Country (All-Time Hall of Fame)
+{chr(10).join([f'- **{k}**: {v} podium finish(es)' for k, v in winners_df['Country'].value_counts().items()])}
+
+---
+*Report generated automatically from ASEAN DSE Analytics Dashboard.*
+"""
+    return report
+
+
 df = load_data()
 
-# Replace the broken ADSE logo link with a highly reliable official ASEAN emblem
-st.sidebar.image("https://aseandse.org/wp-content/uploads/2021/02/logo.png", width=150)
+st.sidebar.image("https://upload.wikimedia.org/wikipedia/en/thumb/8/87/ASEAN_Emblem.svg/250px-ASEAN_Emblem.svg.png",
+                 width=150)
 st.sidebar.title("Data Filters")
 
 # Filter 1: Year
@@ -134,6 +198,56 @@ if selected_country != "All Countries":
 if selected_beneficiary != "All Beneficiaries":
     # Use a string contains check since beneficiary could be part of a comma-separated list
     filtered_df = filtered_df[filtered_df['Target Beneficiary'].str.contains(selected_beneficiary, na=False)]
+
+# --- EXPORT CENTER ---
+st.sidebar.markdown("---")
+st.sidebar.header("📥 Export Center")
+
+if not filtered_df.empty:
+    # 1. Export Filtered Dataset (CSV)
+    csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+    st.sidebar.download_button(
+        label="📄 Download Filtered CSV",
+        data=csv_data,
+        file_name=f"asean_dse_filtered_{selected_year}_{selected_country}.csv",
+        mime="text/csv",
+        help="Download the underlying raw dataset matching your active sidebar filters."
+    )
+
+    # 2. Export Summary Executive Report (Markdown)
+    markdown_report = generate_export_report(
+        filtered_df, df, selected_year, selected_country, selected_beneficiary
+    )
+    st.sidebar.download_button(
+        label="📝 Download Summary Report (.md)",
+        data=markdown_report,
+        file_name=f"ASEAN_DSE_Executive_Summary_{selected_year}.md",
+        mime="text/markdown",
+        help="Download a formatted Markdown report summarizing all key charts and metrics."
+    )
+
+    # 3. Export Key Statistics (JSON)
+    sdg_counts = explode_column(filtered_df, 'Target SDGs')['Target SDGs'].value_counts().to_dict()
+    tech_counts = explode_column(filtered_df, 'Tech Stack Integrated')['Tech Stack Integrated'].value_counts().to_dict()
+    sol_counts = explode_column(filtered_df, 'Solution Type')['Solution Type'].value_counts().to_dict()
+
+    json_stats = {
+        "filter_year": selected_year,
+        "filter_country": selected_country,
+        "filter_beneficiary": selected_beneficiary,
+        "total_storyboards": len(filtered_df),
+        "sdg_distribution": sdg_counts,
+        "tech_stack_distribution": tech_counts,
+        "solution_type_distribution": sol_counts
+    }
+
+    st.sidebar.download_button(
+        label="📊 Download Summary Stats (.json)",
+        data=json.dumps(json_stats, indent=4),
+        file_name=f"asean_dse_stats_{selected_year}.json",
+        mime="application/json",
+        help="Download structured JSON statistics for programmatic analysis or slides."
+    )
 
 st.sidebar.markdown("---")
 st.sidebar.info(
